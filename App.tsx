@@ -1,118 +1,143 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, TextInput, FlatList, TouchableOpacity, Text } from 'react-native';
+import MapboxGl from '@rnmapbox/maps';
+import Geolocation from 'react-native-geolocation-service';
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
-import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+MapboxGl.setAccessToken("pk.eyJ1IjoiaWJyb2hpbWpvbjI1IiwiYSI6ImNtMG8zYm83NzA0bDcybHIxOHlreXRyZnYifQ.7QYLNFuaTX9uaDfvV0054Q");
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+const App = () => {
+    const [currentLocation, setCurrentLocation] = useState(null);
+    const [destination, setDestination] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [routeCoordinates, setRouteCoordinates] = useState([]);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+    useEffect(() => {
+        Geolocation.getCurrentPosition(
+            position => {
+                const { longitude, latitude } = position.coords;
+                setCurrentLocation([longitude, latitude]);
+            },
+            error => {
+                console.error(error);
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+        );
+    }, []);
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+    const fetchSuggestions = async (query) => {
+        if (!query) {
+            setSuggestions([]);
+            return;
+        }
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+        try {
+            const response = await fetch(
+                `https://api.mapbox.com/geocoding/v5/mapbox.places/${query}.json?access_token=sk.eyJ1IjoiaWJyb2hpbWpvbjI1IiwiYSI6ImNtMWJwanIyZjBkbXkya3M2emhuaWVnNHMifQ.Sikiqfo3CbWwa9WFq_CMSA&autocomplete=true&limit=5`
+            );
+            const data = await response.json();
+            setSuggestions(data.features || []);
+        } catch (error) {
+            console.error('Error fetching suggestions:', error);
+        }
+    };
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
-  };
+    const handleDestinationSelect = async (place) => {
+        setDestination(place.place_name);
+        setSuggestions([]);
 
-  return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
+        const destinationCoordinates = place.geometry.coordinates;
+
+        // Fetch directions from Mapbox Directions API
+        try {
+            const response = await fetch(
+                `https://api.mapbox.com/directions/v5/mapbox/driving/${currentLocation[0]},${currentLocation[1]};${destinationCoordinates[0]},${destinationCoordinates[1]}?geometries=geojson&access_token=sk.eyJ1IjoiaWJyb2hpbWpvbjI1IiwiYSI6ImNtMWJwanIyZjBkbXkya3M2emhuaWVnNHMifQ.Sikiqfo3CbWwa9WFq_CMSA`
+            );
+            const data = await response.json();
+            const route = data.routes[0].geometry.coordinates;
+
+            setRouteCoordinates(route);
+        } catch (error) {
+            console.error('Error fetching route:', error);
+        }
+    };
+
+    return (
+        <View style={styles.container}>
+            <TextInput
+                style={styles.input}
+                placeholder="Qayerga bormoqchisiz?"
+                value={destination}
+                onChangeText={(text) => {
+                    setDestination(text);
+                    fetchSuggestions(text); // Qidiruv natijalarini olish
+                }}
+            />
+            {suggestions.length > 0 && (
+                <FlatList
+                    data={suggestions}
+                    keyExtractor={(item) => item.id}
+                    renderItem={({ item }) => (
+                        <TouchableOpacity onPress={() => handleDestinationSelect(item)}>
+                            <Text style={styles.suggestion}>{item.place_name}</Text>
+                        </TouchableOpacity>
+                    )}
+                />
+            )}
+            <MapboxGl.MapView style={styles.map}>
+                {currentLocation && (
+                    <MapboxGl.Camera
+                        zoomLevel={14}
+                        centerCoordinate={currentLocation}
+                    />
+                )}
+                {currentLocation && (
+                    <MapboxGl.PointAnnotation
+                        id="currentLocation"
+                        coordinate={currentLocation}
+                    />
+                )}
+                {routeCoordinates.length > 0 && (
+                    <MapboxGl.ShapeSource
+                        id="routeSource"
+                        shape={{
+                            type: 'Feature',
+                            geometry: {
+                                type: 'LineString',
+                                coordinates: routeCoordinates,
+                            },
+                        }}
+                    >
+                        <MapboxGl.LineLayer id="routeLayer" style={styles.routeLine} />
+                    </MapboxGl.ShapeSource>
+                )}
+            </MapboxGl.MapView>
         </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
+    );
+};
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
+    container: {
+        flex: 1,
+    },
+    map: {
+        flex: 1,
+    },
+    input: {
+        height: 40,
+        borderColor: '#ccc',
+        borderWidth: 1,
+        paddingHorizontal: 10,
+        margin: 10,
+    },
+    suggestion: {
+        padding: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#ccc',
+    },
+    routeLine: {
+        lineWidth: 5,
+        lineColor: 'blue',
+    },
 });
 
 export default App;
